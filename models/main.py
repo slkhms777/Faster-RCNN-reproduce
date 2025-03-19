@@ -43,7 +43,8 @@ def Main():
     roi_features, valid_mask = rpn.ROI_Pooling(FeatureMap, proposals, output_size=7)  # 输出 7×7 特征
     # roi_features 尺寸: (batch_size, top_n, 2048, 7, 7)
     # valid_mask: (batch_size, top_n)  # 记录每个候选框是否有效
-
+    print('roi_features:', roi_features.shape)
+    print('valid_mask:', valid_mask.shape)
 
     """
     # ------------------- 1. 数据预处理 -------------------
