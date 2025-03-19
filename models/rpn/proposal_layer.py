@@ -1,36 +1,31 @@
 import torch
 import torch.nn.functional as F
+from utils.nms import nms
 
 def decode_anchors(anchors, rpn_reg_preds):
-    # anchors: [batch_size, 9, 25, 19, 4]
-    # rpn_reg_preds: [batch_size, 36, 25, 19]
-    proposals = torch.zeros_like(anchors)
-    for i in range(anchors.size(2)):
-        for j in range(anchors.size(3)):
-            for k in range(anchors.size(1)):
-                proposals[:, k, i, j, 0] = anchors[:, k, i, j, 0] + rpn_reg_preds[:, k * 4 + 0, i, j]
-                proposals[:, k, i, j, 1] = anchors[:, k, i, j, 1] + rpn_reg_preds[:, k * 4 + 1, i, j]
-                proposals[:, k, i, j, 2] = anchors[:, k, i, j, 2] + rpn_reg_preds[:, k * 4 + 2, i, j]
-                proposals[:, k, i, j, 3] = anchors[:, k, i, j, 3] + rpn_reg_preds[:, k * 4 + 3, i, j]
+    # anchors: [batch_size, num_anchors, 4]
+    # rpn_reg_preds: [batch_size, num_anchors, 4]
+    proposals = anchors + rpn_reg_preds
     return proposals
 
 def clip_boxes(proposals, img_size):
-    # proposals: [batch_size, 9, 25, 19, 4]
-    # img_size: [H, W]
-    proposals[:, :, :, :, 0] = torch.clamp(proposals[:, :, :, :, 0], min=0, max=img_size[1])
-    proposals[:, :, :, :, 1] = torch.clamp(proposals[:, :, :, :, 1], min=0, max=img_size[0])
-    proposals[:, :, :, :, 2] = torch.clamp(proposals[:, :, :, :, 2], min=0, max=img_size[1])
-    proposals[:, :, :, :, 3] = torch.clamp(proposals[:, :, :, :, 3], min=0, max=img_size[0])
+    # proposals: [batch_size, num_anchors, 4]
+    proposals[:, :, 0] = torch.clamp(proposals[:, :, 0], min=0, max=img_size[1] - 1)  # x_min
+    proposals[:, :, 1] = torch.clamp(proposals[:, :, 1], min=0, max=img_size[0] - 1)  # y_min
+    proposals[:, :, 2] = torch.clamp(proposals[:, :, 2], min=0, max=img_size[1] - 1)  # x_max
+    proposals[:, :, 3] = torch.clamp(proposals[:, :, 3], min=0, max=img_size[0] - 1)  # y_max
     return proposals
 
 def filter_proposals(proposals, foreground_probs, nms_threshold=0.7, top_n=1000):
-    # proposals: [batch_size, 9, 25, 19, 4]
-    # foreground_probs: [batch_size, 9, 25, 19]
+
+
+    # proposals: [batch_size, 25 * 19 * 9 , 4]
+    # foreground_probs: [batch_size, 25 * 19 * 9]
 
     # 保留前景得分高的 top_n 个候选框
     batch_size = proposals.size(0)
     keep_indices = nms(proposals, foreground_probs, nms_threshold, top_n)
-    
+
     # 根据NMS结果筛选候选框
     result_proposals = torch.zeros(batch_size, top_n, 4)  # 创建固定大小的输出张量
     

@@ -1,7 +1,8 @@
 import torch
+from utils.box_ops import iou
 def nms(boxes, foreground_probs, threshold=0.7, top_n=1000):
-    # boxes: [batch_size, 9, 25, 19, 4]
-    # foreground_probs: [batch_size, 9, 25, 19]
+    # boxes: [batch_size, 25 * 19 * 9 , 4]
+    # foreground_probs: [batch_size, 25 * 19 * 9]
     batch_size = boxes.size(0)
     
     # 重塑 boxes 和 foreground_probs 用于处理
