@@ -15,6 +15,7 @@ def Main():
     # anchors: torch.Size([batch_size, 9, 25, 19]) # 每个特征点生成 9 个锚点
 
     RPN = rpn.RPN(in_channels=2048, num_anchors=9)
+    
     rpn_cls_scores, rpn_reg_preds = RPN(FeatureMap)
 
 

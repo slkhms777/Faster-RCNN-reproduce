@@ -4,6 +4,31 @@ import numpy as np
 import torchvision
 
 
+"""
+- `RPN`: 区域提议网络类
+- `generate_anchors`: 生成锚框
+- `decode_anchors`: 将RPN回归值解码为实际边界框
+- `clip_boxes`: 将边界框裁剪到图像范围内
+- `filter_proposals`: 筛选提议框(NMS等)
+- `ROI_Pooling`: ROI池化操作
+"""
+
+class RPN(nn.Module):
+    def __init__(self, in_channels, num_anchors):
+        super(RPN, self).__init__()
+        self.conv = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
+        self.relu = nn.ReLU()
+        self.cls = nn.Conv2d(in_channels, num_anchors * 2, kernel_size=1)
+        self.reg = nn.Conv2d(in_channels, num_anchors * 4, kernel_size=1)
+
+    def forward(self, x):
+        # x为FeatureMap
+        x = self.relu(self.conv(x))
+        cls_scores = self.cls(x)
+        reg_preds = self.reg(x)
+        return cls_scores, reg_preds
+
+
 def generate_anchors(FeatureMap, scales=[128, 256, 512], ratios=[0.5, 1, 2]):
     # FeatureMa : [batch_size, 2048, 25, 19]
     anchors = torch.zeros(FeatureMap.size(0), len(scales) * len(ratios), FeatureMap.size(2), FeatureMap.size(3), 4)
@@ -20,87 +45,6 @@ def generate_anchors(FeatureMap, scales=[128, 256, 512], ratios=[0.5, 1, 2]):
 
     return anchors
 
-def iou(boxes1, boxes2):
-    # boxes1: [N, 4]
-    # boxes2: [M, 4]
-    N = boxes1.size(0)
-    M = boxes2.size(0)
-    lt = torch.max(boxes1[:, None, :2], boxes2[:, :2])  # [N, M, 2] 左上角坐标
-    rb = torch.min(boxes1[:, None, 2:], boxes2[:, 2:])  # [N, M, 2] 右下角坐标
-    wh = (rb - lt).clamp(min=0)  # [N, M, 2]
-    inter = wh[:, :, 0] * wh[:, :, 1]  # [N, M]
-    area1 = (boxes1[:, 2] - boxes1[:, 0]) * (boxes1[:, 3] - boxes1[:, 1])  # [N]
-    area2 = (boxes2[:, 2] - boxes2[:, 0]) * (boxes2[:, 3] - boxes2[:, 1])  # [M]
-    iou = inter / (area1[:, None] + area2 - inter)
-    # iou: [N, M]
-    return iou
-
-def nms(boxes, foreground_probs, threshold=0.7, top_n=1000):
-    # boxes: [batch_size, 9, 25, 19, 4]
-    # foreground_probs: [batch_size, 9, 25, 19]
-    batch_size = boxes.size(0)
-    
-    # 重塑 boxes 和 foreground_probs 用于处理
-    boxes_reshaped = boxes.view(batch_size, -1, 4)  # [batch_size, 4275, 4]
-    foreground_probs = foreground_probs.view(batch_size, -1)  # [batch_size, 4275]
-    
-    # 存储每个批次的保留索引
-    batch_keep_indices = []
-    
-    # 对每个批次单独执行 NMS
-    for i in range(batch_size):
-        # 按分数降序排序
-        scores = foreground_probs[i]
-        boxes_batch = boxes_reshaped[i]
-        _, order = torch.sort(scores, descending=True)
-        
-        keep = []
-        while order.numel() > 0:
-            # 保留分数最高的框
-            if len(keep) >= top_n:
-                break
-                
-            # 当前分数最高的框
-            idx = order[0]
-            keep.append(idx)
-            
-            # 如果只剩一个框，结束循环
-            if order.numel() == 1:
-                break
-                
-            # 计算当前最高分框与其他框的IoU
-            current_box = boxes_batch[idx].unsqueeze(0)  # [1, 4]
-            other_boxes = boxes_batch[order[1:]]  # [n-1, 4]
-            
-            ious = iou(current_box, other_boxes)[0]  # [n-1]
-            
-            # 保留IoU低于阈值的框
-            order = order[1:][ious < threshold]
-            # keep_order = order[1:][ious < threshold]
-            # if keep_order.numel() + len(keep) >= top_n:
-            #     order = keep_order
-            # else:
-            #     order = order[1:]
-
-        batch_keep_indices.append(torch.tensor(keep))
-    
-    # 将保留的索引打包成一个张量
-    return batch_keep_indices
-
-class RPN(nn.Module):
-    def __init__(self, in_channels, num_anchors):
-        super(RPN, self).__init__()
-        self.conv = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
-        self.relu = nn.ReLU()
-        self.cls = nn.Conv2d(in_channels, num_anchors * 2, kernel_size=1)
-        self.reg = nn.Conv2d(in_channels, num_anchors * 4, kernel_size=1)
-
-    def forward(self, x):
-        # x为FeatureMap
-        x = self.relu(self.conv(x))
-        cls_scores = self.cls(x)
-        reg_preds = self.reg(x)
-        return cls_scores, reg_preds
 
 def decode_anchors(anchors, rpn_reg_preds):
     # anchors: [batch_size, 9, 25, 19, 4]
@@ -182,6 +126,62 @@ def ROI_Pooling(FeatureMap, proposals, output_size=7):
     return roi_features, mask
 
 
+
+
+
+def nms(boxes, foreground_probs, threshold=0.7, top_n=1000):
+    # boxes: [batch_size, 9, 25, 19, 4]
+    # foreground_probs: [batch_size, 9, 25, 19]
+    batch_size = boxes.size(0)
+    
+    # 重塑 boxes 和 foreground_probs 用于处理
+    boxes_reshaped = boxes.view(batch_size, -1, 4)  # [batch_size, 4275, 4]
+    foreground_probs = foreground_probs.view(batch_size, -1)  # [batch_size, 4275]
+    
+    # 存储每个批次的保留索引
+    batch_keep_indices = []
+    
+    # 对每个批次单独执行 NMS
+    for i in range(batch_size):
+        # 按分数降序排序
+        scores = foreground_probs[i]
+        boxes_batch = boxes_reshaped[i]
+        _, order = torch.sort(scores, descending=True)
+        
+        keep = []
+        while order.numel() > 0:
+            # 保留分数最高的框
+            if len(keep) >= top_n:
+                break
+                
+            # 当前分数最高的框
+            idx = order[0]
+            keep.append(idx)
+            
+            # 如果只剩一个框，结束循环
+            if order.numel() == 1:
+                break
+                
+            # 计算当前最高分框与其他框的IoU
+            current_box = boxes_batch[idx].unsqueeze(0)  # [1, 4]
+            other_boxes = boxes_batch[order[1:]]  # [n-1, 4]
+            
+            ious = iou(current_box, other_boxes)[0]  # [n-1]
+            
+            # 保留IoU低于阈值的框
+            order = order[1:][ious < threshold]
+            # keep_order = order[1:][ious < threshold]
+            # if keep_order.numel() + len(keep) >= top_n:
+            #     order = keep_order
+            # else:
+            #     order = order[1:]
+
+        batch_keep_indices.append(torch.tensor(keep))
+    
+    # 将保留的索引打包成一个张量
+    return batch_keep_indices
+
+
 def DetectionHead(roi_features, valid_mask, num_classes=21):
     # roi_features: [batch_size, top_n, 2048, 7, 7]
     # valid_mask: [batch_size, top_n]
@@ -224,7 +224,7 @@ def DetectionHead(roi_features, valid_mask, num_classes=21):
 def decode_proposals(proposals, reg_preds):
     # proposals torch.Size([batch_size, top_n, 4])
     # reg_preds: [batch_size, top_n, 4]
-    
+
     detections = proposals + reg_preds
     # detections: [batch_size, top_n, 4]
 
