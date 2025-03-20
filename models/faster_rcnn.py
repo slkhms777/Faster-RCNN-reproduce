@@ -1,15 +1,11 @@
 import torch
 from torch import nn
-from backbone import backbone
-import rpn
-import roi_heads
-from rpn import anchor_generator
-from rpn import proposal_layer
-from rpn import rpn_head
-from roi_heads import box_heads
-from roi_heads import roi_pooling
-
-
+from models.backbone import backbone
+from models.rpn import  anchor_generator
+from models.rpn import proposal_layer
+from models.rpn import rpn_head
+from models.roi_heads import roi_pooling
+from models.roi_heads import box_head
 
 class FasterRCNN(nn.Module):
     def __init__(self, image_shape, num_classes=21):
@@ -19,10 +15,7 @@ class FasterRCNN(nn.Module):
 
         self.Backbone = backbone.get_net('resnet50', pretrained=True, output_size='small')
         
-        self.anchor_generator = anchor_generator.generate_anchors(
-            sizes=[128, 256, 512],
-            aspect_ratios=[0.5, 1, 2]
-        )
+        self.anchor_generator = anchor_generator.generate_anchors
 
         self.RPN = rpn_head.RPN(in_channels=2048, num_anchors=9)
 
@@ -31,8 +24,8 @@ class FasterRCNN(nn.Module):
         self.anchor_filter = proposal_layer.filter_proposals #参数: proposals, foreground_probs, nms_threshold=0.7, top_n=1000
         
         self.ROI_Pooling = roi_pooling.ROI_Pooling
-        self.DetectionHead = box_heads.DetectionHead
-        self.proposal_decoder = box_heads.decode_proposals
+        self.DetectionHead = box_head.DetectionHead
+        self.proposal_decoder = box_head.decode_proposals
     
     def forward(self, x):
         """生成特征图"""
@@ -59,24 +52,26 @@ class FasterRCNN(nn.Module):
         # foreground_probs: torch.Size([batch_size, 25 * 19 * 9])
 
         """生成候选框"""
-        proposals = self.anchor_decoder(anchors, rpn_reg_preds)
-        proposals = self.anchor_clipper(proposals, (self.h, self.w))
-        proposals = self.anchor_filter(
+        proposals = self.anchor_decoder(anchors, rpn_reg_preds)      # 加上偏移量
+        proposals = self.anchor_clipper(proposals, (self.h, self.w)) # 裁剪到图像范围
+        proposals = self.anchor_filter(                              # nms筛选候选框
             proposals,
             foreground_probs,
             nms_threshold=0.7,
             top_n=1000
         )
-        
 
         """ROI处理"""
         roi_features, valid_mask = self.ROI_Pooling(FeatureMap, proposals, output_size=7)
+        # roi_features: torch.Size([batch_size, top_n, 2048, 7, 7])
+        # valid_mask: torch.Size([batch_size, top_n])
 
         """检测头阶段"""
         cls_scores, reg_preds = self.DetectionHead(roi_features, valid_mask)
 
         """最终检测结果"""
         detections = self.proposal_decoder(proposals, reg_preds)
+        return (detections, cls_scores)
 
 
 
